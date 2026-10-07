@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Mution Finance"
+description = "A private internal finance app for Mution.tech to track income, expenses, cash flow, and monthly profitability with Supabase-backed storage."
+version = "1.0.0"
+id = "artifacts/mution-finance"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19716
+
+[services.development]
+run = "pnpm --filter @workspace/mution-finance run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mution-finance", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/mution-finance/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19716"
+BASE_PATH = "/"
