@@ -1,0 +1,91 @@
+Mution Finance: Web Kelola Keuangan SaaS
+Aplikasi internal (Internal Tool) terpisah yang didesain khusus untuk mencatat, melacak, dan menganalisis arus kas (Cash Flow), pengeluaran operasional (OPEX), dan keuntungan bersih (Net Profit) dari Mution.tech.
+
+1. Core Objectives (Tujuan Utama)
+Pemisahan Data: Menjauhkan data sensitif keuangan perusahaan dari sistem core Mution (PaaS & API Gateway).
+Fleksibilitas Pencatatan: Bisa mencatat pengeluaran yang tidak ada di sistem utama (gaji, kopi, langganan tools, pajak, marketing).
+Analisis Profitabilitas: Menjawab pertanyaan: "Bulan ini Mution untung bersih berapa setelah dipotong semua biaya server, AI, dan operasional?"
+2. Tech Stack Recommendation (Rekomendasi Teknologi)
+Karena ini untuk internal tool, kecepatan development dan keamanan adalah yang utama.
+
+Framework: Next.js 14/15 (App Router) atau Vite + React
+Database: Supabase (PostgreSQL) atau Firebase (untuk kecepatan setup)
+Styling: Tailwind CSS + shadcn/ui (Sama seperti Mution, agar feel-nya familiar)
+State Management: TanStack Query (React Query)
+Auth: Supabase Auth (dibatasi hanya untuk email @mution.tech atau email founder saja).
+3. Database Schema (Konsep Struktur Data)
+Sistem keuangan sederhana membutuhkan 3 tabel utama:
+
+A. Tabel transactions (Transaksi)
+Mencatat seluruh uang masuk dan keluar secara real.
+
+id (UUID, Primary Key)
+date (Timestamp) -> Tanggal transaksi terjadi
+type (Enum: INCOME | EXPENSE) -> Pemasukan atau Pengeluaran
+category_id (Foreign Key) -> Kategori transaksi (Gaji, API, Server, Top-up)
+amount (Decimal/Float) -> Jumlah uang (Rupiah)
+description (Text) -> Catatan tambahan (misal: "Top up via Midtrans", "Bayar tagihan OpenAI")
+payment_method (String) -> (misal: "BCA", "Gopay", "Kartu Kredit")
+receipt_url (String, Optional) -> Link ke foto bon/invoice.
+B. Tabel categories (Kategori)
+Memudahkan pengelompokan untuk chart dan report.
+
+id (UUID)
+name (String) -> (misal: "Marketing", "Server Cost", "AI Cost", "User Top-up")
+type (Enum: INCOME | EXPENSE)
+color (String) -> Kode hex warna untuk chart (misal: #f97316).
+C. Tabel budgets (Anggaran Bulanan - Optional/V2)
+Untuk membatasi pengeluaran.
+
+id (UUID)
+month_year (String/Date) -> (misal: "2026-10")
+category_id (Foreign Key)
+limit_amount (Decimal) -> Batas pengeluaran (misal: Budget API OpenAI Rp 5.000.000/bulan).
+4. Fitur & UI/UX Design (Halaman Web)
+A. Dashboard / Overview (Halaman Utama)
+Halaman pertama saat login, memberikan ringkasan kondisi keuangan bulan ini.
+
+Top KPI Cards:
+Total Pendapatan (Bulan ini): Rp XXX
+Total Pengeluaran (Bulan ini): Rp YYY
+Net Profit (Keuntungan Bersih): Rp ZZZ (Warna hijau jika +, merah jika -)
+Sisa Saldo di Bank/Kas: Total aset tunai saat ini.
+Charts:
+Bar Chart (Cash Flow): Membandingkan batang hijau (Income) dan merah (Expense) dari bulan ke bulan (6 bulan terakhir).
+Donut Chart (Pengeluaran): Melihat porsi pengeluaran (Misal: 50% AI Cost, 20% Server, 30% Iklan).
+Recent Transactions: Tabel kecil menampilkan 5 transaksi terakhir yang di-input.
+B. Transactions (Halaman Jurnal/Buku Kas)
+Tempat utama untuk melihat dan mencari riwayat uang.
+
+Tabel Data: Menampilkan Tanggal, Deskripsi, Kategori, Tipe, dan Jumlah.
+Filters: Filter berdasarkan Bulan, Tipe (Income/Expense), dan Kategori.
+Tombol "+ Catat Transaksi":
+Membuka Modal/Drawer dengan form: Tipe, Nominal, Kategori, Tanggal, Deskripsi.
+Nice to have: Tombol Upload untuk foto struk/invoice (disimpan di Supabase Storage).
+C. Reports & Analytics (Halaman Laporan)
+Untuk evaluasi bisnis akhir bulan.
+
+Laba Rugi (Profit & Loss Statement): Ringkasan klasik seperti akuntan.
+Pendapatan (Revenue)
+Harga Pokok Penjualan (Server + AI) -> Laba Kotor (Gross Profit)
+Beban Operasional (Gaji, Iklan) -> Laba Bersih (Net Profit)
+Export to Excel/CSV: Tombol untuk download laporan keuangan jika butuh diaudit atau di- backup.
+D. Settings & Categories
+Halaman khusus admin/owner untuk menambah/mengedit "Kategori Pengeluaran".
+Ganti password atau tambah akses untuk Co-Founder.
+5. Integrasi Sistem (Otomatisasi - Opsional tapi Sangat Keren)
+Karena dipisah, input pendapatan (Top-up user) bisa jadi capek kalau manual tiap hari. Solusinya:
+
+Webhooks: Di sistem Mution (web utama), kamu bisa pasang webhook. Setiap kali ada user sukses Top-up via Midtrans, Mution utama akan mengirim HTTP POST ke API Mution Finance ini.
+Efek: Pendapatan otomatis tercatat! Kamu hanya perlu mengurus input pengeluaran secara manual setiap kali bayar tagihan atau jajan kopi.
+6. Prompt Instruksi untuk AI Agent Selanjutnya
+Kamu bisa langsung memberikan prompt ini ke AI Agent lain:
+
+*"Buatkan saya aplikasi SaaS Internal untuk Manajemen Keuangan bernama 'Mution Finance' menggunakan Next.js 14 App Router, Tailwind CSS, shadcn/ui, dan Supabase.
+
+Aplikasi ini butuh 3 halaman:
+
+Dashboard (KPI Laba Bersih, Pengeluaran, Pendapatan, dan Bar Chart Cash Flow).
+Transaksi (Tabel riwayat dengan filter bulan/kategori, dan form Modal untuk tambah transaksi).
+Laporan (Laba Rugi simpel per bulan).
+Tolong buatkan dulu skema database Supabase-nya (tabel transactions dan categories), lalu buatkan struktur layout (sidebar) dan halaman Dashboard-nya dengan data dummy/mocking terlebih dahulu."*
