@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import {
@@ -22,6 +22,8 @@ const monthLabel = (m: string) => new Date(`${m}-01T12:00:00`).toLocaleDateStrin
 const rupiah = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 const dateLabel = (date: string) => new Date(date).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric" });
 const dateInputValue = (date: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(date));
+const normalizeRupiahDigits = (value: string) => value.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+const formatRupiahInput = (value: string) => normalizeRupiahDigits(value).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 const donutGradient = (slices: { color: string; percentage: number }[]) => {
   let offset = 0;
   const stops = slices.map(({ color, percentage }) => {
@@ -54,6 +56,100 @@ function LoadingRows() { return <div className="space-y-3 p-5">{[1, 2, 3, 4].map
 function QueryError({ retry }: { retry: () => void }) { return <div className="p-8 text-center"><p className="font-semibold">Data belum bisa dimuat</p><p className="mt-1 text-sm text-muted-foreground">Periksa koneksi Supabase dan pastikan migrasi database sudah dijalankan.</p><button onClick={retry} className="mt-4 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold">Coba lagi</button></div>; }
 function EmptyState({ title, text, action }: { title: string; text: string; action?: React.ReactNode }) { return <div className="flex min-h-[210px] flex-col items-center justify-center px-6 text-center"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-accent text-primary"><FileText size={20} /></div><h3 className="font-semibold">{title}</h3><p className="mt-1 max-w-sm text-sm text-muted-foreground">{text}</p>{action && <div className="mt-4">{action}</div>}</div>; }
 
+type RupiahInputProps = Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "value" | "onChange" | "onBlur" | "type" | "inputMode"
+> & {
+  value: string;
+  onValueChange: (value: string) => void;
+  onBlur?: (value: string) => void;
+  testId?: string;
+};
+
+function RupiahInput({ value, onValueChange, onBlur, testId, className = "form-input", placeholder = "0", disabled, ...inputProps }: RupiahInputProps) {
+  const [displayValue, setDisplayValue] = useState(() => formatRupiahInput(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+  const rawValueRef = useRef(value);
+
+  useEffect(() => {
+    rawValueRef.current = value;
+    setDisplayValue(formatRupiahInput(value));
+  }, [value]);
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const inputValue = event.currentTarget.value;
+    const cursor = event.currentTarget.selectionStart ?? inputValue.length;
+    const digitsBeforeCursor = normalizeRupiahDigits(
+      inputValue.slice(0, cursor),
+    ).length;
+    const nextRawValue = normalizeRupiahDigits(inputValue);
+    const nextDisplayValue = formatRupiahInput(nextRawValue);
+    rawValueRef.current = nextRawValue;
+    setDisplayValue(nextDisplayValue);
+    onValueChange(nextRawValue);
+
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input || document.activeElement !== input) return;
+      let nextCursor = 0;
+      if (digitsBeforeCursor > 0) {
+        let digitCount = 0;
+        nextCursor = nextDisplayValue.length;
+        for (let index = 0; index < nextDisplayValue.length; index += 1) {
+          if (/\d/.test(nextDisplayValue[index])) digitCount += 1;
+          if (digitCount >= digitsBeforeCursor) {
+            nextCursor = index + 1;
+            break;
+          }
+        }
+      }
+      input.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  return (
+    <input
+      {...inputProps}
+      ref={inputRef}
+      data-testid={testId}
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      value={displayValue}
+      onChange={handleChange}
+      onBlur={() => onBlur?.(rawValueRef.current)}
+      disabled={disabled}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+}
+
+function BudgetInput({ categoryId, month, value, onCommit, disabled }: { categoryId: string; month: string; value: number; onCommit: (categoryId: string, rawValue: string) => void; disabled: boolean }) {
+  const [rawValue, setRawValue] = useState(value > 0 ? String(Math.round(value)) : "");
+  useEffect(() => {
+    setRawValue(value > 0 ? String(Math.round(value)) : "");
+  }, [month, value]);
+
+  return (
+    <div className="relative w-[150px]">
+      <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-[10px] text-muted-foreground">Rp</span>
+      <RupiahInput
+        testId={`input-budget-${categoryId}`}
+        value={rawValue}
+        onValueChange={setRawValue}
+        onBlur={(nextValue) => {
+          if (nextValue) onCommit(categoryId, nextValue);
+          else setRawValue(value > 0 ? String(Math.round(value)) : "");
+        }}
+        disabled={disabled}
+        placeholder="Atur batas"
+        className="form-input h-8 pl-7 pr-2 text-xs disabled:bg-muted"
+      />
+    </div>
+  );
+}
+
 function MetricCard({ label, value, hint, icon: Icon, tone = "default" }: { label: string; value: number; hint: string; icon: typeof Wallet; tone?: "default" | "orange" | "green" | "red" }) {
   const styles = { default: "bg-white", orange: "bg-[#fff6ef]", green: "bg-[#f1f8f4]", red: "bg-[#fff4f1]" };
   return <div className={`rounded-2xl border border-border/80 p-5 shadow-[0_2px_10px_rgba(79,52,27,.025)] ${styles[tone]}`}>
@@ -73,13 +169,13 @@ function DialogFrame({ title, subtitle, onClose, children }: { title: string; su
 
 type TxValues = { date: string; type: TransactionType; category_id: string; amount: string; description: string; payment_method: string; receipt_url: string };
 function TransactionForm({ categories, initial, onCancel, onSubmit, busy, error }: { categories: Category[]; initial?: Transaction; onCancel: () => void; onSubmit: (input: TransactionInput) => void; busy: boolean; error?: string }) {
-  const form = useForm<TxValues>({ defaultValues: { date: initial ? dateInputValue(initial.date) : dateInputValue(new Date().toISOString()), type: initial?.type || "EXPENSE", category_id: initial?.category_id || "", amount: initial ? String(initial.amount) : "", description: initial?.description || "", payment_method: initial?.payment_method || "", receipt_url: initial?.receipt_url || "" } });
+  const form = useForm<TxValues>({ defaultValues: { date: initial ? dateInputValue(initial.date) : dateInputValue(new Date().toISOString()), type: initial?.type || "EXPENSE", category_id: initial?.category_id || "", amount: initial ? String(Math.round(initial.amount)) : "", description: initial?.description || "", payment_method: initial?.payment_method || "", receipt_url: initial?.receipt_url || "" } });
   const type = form.watch("type");
   const options = categories.filter((item) => item.type === type);
   return <Form {...form}><form onSubmit={form.handleSubmit((v) => onSubmit({ ...v, amount: Number(v.amount), date: new Date(`${v.date}T12:00:00+07:00`).toISOString(), payment_method: v.payment_method || null, receipt_url: v.receipt_url || null }))} className="space-y-4">
     <div className="grid grid-cols-2 gap-3"><FormField control={form.control} name="type" render={({ field }) => <FormItem><FormLabel>Jenis</FormLabel><FormControl><select data-testid="select-transaction-type" {...field} className="form-input"><option value="EXPENSE">Pengeluaran</option><option value="INCOME">Pemasukan</option></select></FormControl><FormMessage /></FormItem>} /><FormField control={form.control} name="date" rules={{ required: "Tanggal wajib diisi" }} render={({ field }) => <FormItem><FormLabel>Tanggal</FormLabel><FormControl><input data-testid="input-transaction-date" type="date" {...field} className="form-input" /></FormControl><FormMessage /></FormItem>} /></div>
     <FormField control={form.control} name="description" rules={{ required: "Deskripsi wajib diisi" }} render={({ field }) => <FormItem><FormLabel>Deskripsi</FormLabel><FormControl><input data-testid="input-transaction-description" placeholder="Contoh: Tagihan AWS" {...field} className="form-input" /></FormControl><FormMessage /></FormItem>} />
-    <div className="grid grid-cols-2 gap-3"><FormField control={form.control} name="category_id" rules={{ required: "Pilih kategori" }} render={({ field }) => <FormItem><FormLabel>Kategori</FormLabel><FormControl><select data-testid="select-transaction-category" {...field} className="form-input"><option value="">Pilih kategori</option>{options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></FormControl><FormMessage /></FormItem>} /><FormField control={form.control} name="amount" rules={{ required: "Jumlah wajib diisi", validate: (v) => Number(v) > 0 || "Jumlah harus lebih dari 0" }} render={({ field }) => <FormItem><FormLabel>Jumlah (Rp)</FormLabel><FormControl><input data-testid="input-transaction-amount" type="number" min="1" {...field} placeholder="0" className="form-input" /></FormControl><FormMessage /></FormItem>} /></div>
+    <div className="grid grid-cols-2 gap-3"><FormField control={form.control} name="category_id" rules={{ required: "Pilih kategori" }} render={({ field }) => <FormItem><FormLabel>Kategori</FormLabel><FormControl><select data-testid="select-transaction-category" {...field} className="form-input"><option value="">Pilih kategori</option>{options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></FormControl><FormMessage /></FormItem>} /><FormField control={form.control} name="amount" rules={{ required: "Jumlah wajib diisi", validate: (v) => Number(v) > 0 || "Jumlah harus lebih dari 0" }} render={({ field }) => <FormItem><FormLabel>Jumlah (Rp)</FormLabel><FormControl><RupiahInput testId="input-transaction-amount" value={field.value} onValueChange={field.onChange} onBlur={() => field.onBlur()} placeholder="0" /></FormControl><FormMessage /></FormItem>} /></div>
     <FormField control={form.control} name="payment_method" render={({ field }) => <FormItem><FormLabel>Metode pembayaran <span className="font-normal text-muted-foreground">· opsional</span></FormLabel><FormControl><input data-testid="input-payment-method" {...field} placeholder="BCA, kartu, transfer…" className="form-input" /></FormControl><FormMessage /></FormItem>} />
     {error && <p className="rounded-lg bg-[#fff2ef] px-3 py-2 text-sm text-destructive">{error}</p>}<div className="flex justify-end gap-2 pt-2"><button type="button" onClick={onCancel} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-muted">Batal</button><button data-testid="button-save-transaction" disabled={busy} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-60">{busy ? "Menyimpan…" : "Simpan transaksi"}</button></div>
   </form></Form>;
@@ -198,7 +294,7 @@ export function SettingsPage() {
         {remove.isError && <p className="mx-5 mb-4 rounded-lg bg-[#fff2ef] p-3 text-xs text-destructive">{(remove.error as Error).message}</p>}
       </section>
       <section className="overflow-hidden rounded-2xl border border-border bg-white"><div className="border-b border-border px-5 py-4"><h2 className="font-serif text-lg font-bold">Anggaran bulanan</h2><p className="mt-1 text-xs text-muted-foreground">Tetapkan batas untuk pengeluaran per kategori.</p></div>
-        {budgets.isLoading || categories.isLoading ? <LoadingRows /> : budgets.isError ? <QueryError retry={() => void budgets.refetch()} /> : expenseCats.length ? <div className="divide-y divide-border/70">{expenseCats.map(c => { const b = budgetMap.get(c.id); const used = spent.get(c.id) || 0; const limit = b?.limit_amount || 0; const pct = limit ? Math.min(100, used / limit * 100) : 0; return <div key={c.id} className="px-5 py-4"><div className="flex items-center justify-between gap-4"><div className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} /><span className="text-sm font-semibold">{c.name}</span></div><span className="text-[11px] text-muted-foreground">{rupiah(used)}{limit ? ` / ${rupiah(limit)}` : " terpakai"}</span></div><div className="mt-3 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full ${pct >= 90 ? "bg-[#d37458]" : "bg-[#83aa8f]"}`} style={{ width: `${pct}%` }} /></div><div className="relative w-[132px]"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">Rp</span><input data-testid={`input-budget-${c.id}`} key={`${c.id}-${month}-${b?.limit_amount || 0}`} type="number" min="0" defaultValue={b?.limit_amount || ""} disabled={!isAdmin} onBlur={e => budgetChange(c.id, e.currentTarget.value)} onKeyDown={e => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }} placeholder="Atur batas" className="form-input h-8 pl-7 pr-2 text-xs disabled:bg-muted" /></div></div></div>; })}</div> : <EmptyState title="Tambahkan kategori biaya" text="Kategori pengeluaran diperlukan sebelum anggaran dapat disusun." />}
+        {budgets.isLoading || categories.isLoading ? <LoadingRows /> : budgets.isError ? <QueryError retry={() => void budgets.refetch()} /> : expenseCats.length ? <div className="divide-y divide-border/70">{expenseCats.map(c => { const b = budgetMap.get(c.id); const used = spent.get(c.id) || 0; const limit = b?.limit_amount || 0; const pct = limit ? Math.min(100, used / limit * 100) : 0; return <div key={c.id} className="px-5 py-4"><div className="flex items-center justify-between gap-4"><div className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} /><span className="text-sm font-semibold">{c.name}</span></div><span className="text-[11px] text-muted-foreground">{rupiah(used)}{limit ? ` / ${rupiah(limit)}` : " terpakai"}</span></div><div className="mt-3 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full ${pct >= 90 ? "bg-[#d37458]" : "bg-[#83aa8f]"}`} style={{ width: `${pct}%` }} /></div><BudgetInput key={`${c.id}-${month}-${b?.limit_amount || 0}`} categoryId={c.id} month={month} value={b?.limit_amount || 0} onCommit={budgetChange} disabled={!isAdmin} /></div></div>; })}</div> : <EmptyState title="Tambahkan kategori biaya" text="Kategori pengeluaran diperlukan sebelum anggaran dapat disusun." />}
         {saveBudget.isError && <p className="mx-5 mb-4 rounded-lg bg-[#fff2ef] p-3 text-xs text-destructive">{(saveBudget.error as Error).message}</p>}{saveBudget.isSuccess && <p className="mx-5 mb-4 text-xs text-[#39795b]">Anggaran berhasil disimpan.</p>}
       </section>
     </div>
