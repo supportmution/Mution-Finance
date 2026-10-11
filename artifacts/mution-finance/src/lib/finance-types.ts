@@ -1,5 +1,18 @@
 export type TransactionType = "INCOME" | "EXPENSE";
+export type TransactionPurpose =
+  | "OPERATING"
+  | "OWNER_CAPITAL"
+  | "OWNER_WITHDRAWAL"
+  | "LOAN_RECEIVED"
+  | "LOAN_PRINCIPAL_REPAYMENT"
+  | "LOAN_INTEREST"
+  | "ASSET_PURCHASE";
 export type CostClass = "DIRECT" | "OPERATING" | null;
+
+export type FinanceSettings = {
+  opening_balance: number;
+  opening_date: string;
+};
 
 export type Category = {
   id: string;
@@ -13,7 +26,8 @@ export type Transaction = {
   id: string;
   date: string;
   type: TransactionType;
-  category_id: string;
+  purpose: TransactionPurpose;
+  category_id: string | null;
   amount: number;
   description: string;
   payment_method: string | null;
@@ -32,6 +46,7 @@ export type Budget = {
 export type TransactionFilters = {
   month?: string;
   type?: TransactionType | "ALL";
+  purpose?: TransactionPurpose | "ALL";
   categoryId?: string;
   search?: string;
 };
@@ -39,7 +54,8 @@ export type TransactionFilters = {
 export type TransactionInput = {
   date: string;
   type: TransactionType;
-  category_id: string;
+  purpose: TransactionPurpose;
+  category_id: string | null;
   amount: number;
   description: string;
   payment_method?: string | null;
@@ -69,8 +85,8 @@ export type FinanceAccess = {
 
 export type CashFlowPoint = {
   month: string;
-  income: number;
-  expense: number;
+  cashIn: number;
+  cashOut: number;
 };
 
 export type ExpenseSlice = {
@@ -87,6 +103,11 @@ export type FinanceDashboard = {
   expense: number;
   netProfit: number;
   cashBalance: number;
+  ownerCapital: number;
+  ownerWithdrawals: number;
+  loanBalance: number;
+  assetPurchases: number;
+  retainedEarnings: number;
   cashFlow: CashFlowPoint[];
   expenseBreakdown: ExpenseSlice[];
   recentTransactions: Transaction[];
@@ -98,5 +119,7 @@ export type ProfitLossReport = {
   directCosts: number;
   grossProfit: number;
   operatingExpenses: number;
+  operatingProfit: number;
+  financeCosts: number;
   netProfit: number;
 };

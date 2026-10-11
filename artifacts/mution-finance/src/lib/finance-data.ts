@@ -14,10 +14,12 @@ import type {
   ExpenseSlice,
   FinanceAccess,
   FinanceDashboard,
+  FinanceSettings,
   ProfitLossReport,
   Transaction,
   TransactionFilters,
   TransactionInput,
+  TransactionPurpose,
   TransactionType,
 } from "@/lib/finance-types";
 
@@ -38,6 +40,7 @@ type DemoData = {
   transactions: Transaction[];
   budgets: Budget[];
   accessList: FinanceAccess[];
+  settings: FinanceSettings;
 };
 
 function isoDay(day: number, offset = 0) {
@@ -75,6 +78,7 @@ function initialDemoData(): DemoData {
       id: `demo-${index + 1}`,
       date: isoDay(day),
       type,
+      purpose: "OPERATING" as const,
       category_id: categoryId,
       amount,
       description,
@@ -89,6 +93,10 @@ function initialDemoData(): DemoData {
     categories: demoCategories,
     transactions,
     budgets: [],
+    settings: {
+      opening_balance: 0,
+      opening_date: `${currentMonth()}-01`,
+    },
     accessList: [
       {
         email: "founder@mution.tech",
@@ -108,9 +116,13 @@ function readDemoData(): DemoData {
     const initial = initialDemoData();
     return {
       categories: parsed.categories ?? initial.categories,
-      transactions: parsed.transactions ?? initial.transactions,
+      transactions: (parsed.transactions ?? initial.transactions).map((row) => ({
+        ...row,
+        purpose: row.purpose ?? "OPERATING",
+      })),
       budgets: parsed.budgets ?? initial.budgets,
       accessList: parsed.accessList ?? initial.accessList,
+      settings: parsed.settings ?? initial.settings,
     };
   } catch {
     return initialDemoData();
@@ -127,7 +139,8 @@ function normalizeTransaction(row: Record<string, unknown>): Transaction {
     id: String(row.id),
     date: String(row.date),
     type: row.type as TransactionType,
-    category_id: String(row.category_id),
+    purpose: (row.purpose as TransactionPurpose) || "OPERATING",
+    category_id: row.category_id ? String(row.category_id) : null,
     amount: Number(row.amount),
     description: String(row.description ?? ""),
     payment_method: row.payment_method ? String(row.payment_method) : null,
@@ -185,6 +198,20 @@ async function getAllTransactions(): Promise<Transaction[]> {
   );
 }
 
+async function getFinanceSettings(): Promise<FinanceSettings> {
+  if (!supabase) return readDemoData().settings;
+  const { data, error } = await supabase
+    .from("finance_settings")
+    .select("opening_balance,opening_date")
+    .eq("id", true)
+    .single();
+  if (error) throw error;
+  return {
+    opening_balance: Number(data.opening_balance),
+    opening_date: String(data.opening_date),
+  };
+}
+
 export function useTransactions(filters: TransactionFilters = {}) {
   return useQuery({
     queryKey: financeKeys.transactions(filters),
@@ -193,6 +220,9 @@ export function useTransactions(filters: TransactionFilters = {}) {
       if (filters.month) rows = rowsForMonth(rows, filters.month);
       if (filters.type && filters.type !== "ALL") {
         rows = rows.filter((row) => row.type === filters.type);
+      }
+      if (filters.purpose && filters.purpose !== "ALL") {
+        rows = rows.filter((row) => row.purpose === filters.purpose);
       }
       if (filters.categoryId) {
         rows = rows.filter((row) => row.category_id === filters.categoryId);
@@ -237,18 +267,23 @@ export function useFinanceDashboard(month = currentMonth()) {
   return useQuery({
     queryKey: financeKeys.dashboard(month),
     queryFn: async (): Promise<FinanceDashboard> => {
-      const [allTransactions, categories] = await Promise.all([
+      const [allTransactions, categories, settings] = await Promise.all([
         getAllTransactions(),
         supabase
           ? supabase.from("categories").select("*")
           : Promise.resolve({ data: readDemoData().categories, error: null }),
+        getFinanceSettings(),
       ]);
       if (categories.error) throw categories.error;
       const categoryRows = (categories.data ?? []) as Category[];
       const monthTransactions = rowsForMonth(allTransactions, month);
       const sum = (rows: Transaction[], type: TransactionType) =>
         rows
-          .filter((transaction) => transaction.type === type)
+          .filter(
+            (transaction) =>
+              transaction.purpose === "OPERATING" &&
+              transaction.type === type,
+          )
           .reduce((total, transaction) => total + transaction.amount, 0);
       const expense = sum(monthTransactions, "EXPENSE");
       const income = sum(monthTransactions, "INCOME");
@@ -258,15 +293,25 @@ export function useFinanceDashboard(month = currentMonth()) {
         const rows = rowsForMonth(allTransactions, flowMonth);
         return {
           month: flowMonth,
-          income: sum(rows, "INCOME"),
-          expense: sum(rows, "EXPENSE"),
+          cashIn: rows
+            .filter((transaction) => transaction.type === "INCOME")
+            .reduce((total, transaction) => total + transaction.amount, 0),
+          cashOut: rows
+            .filter((transaction) => transaction.type === "EXPENSE")
+            .reduce((total, transaction) => total + transaction.amount, 0),
         };
       });
 
       const breakdownAmounts = new Map<string, number>();
       monthTransactions
-        .filter((transaction) => transaction.type === "EXPENSE")
+        .filter(
+          (transaction) =>
+            transaction.purpose === "OPERATING" &&
+            transaction.type === "EXPENSE" &&
+            transaction.category_id,
+        )
         .forEach((transaction) => {
+          if (!transaction.category_id) return;
           breakdownAmounts.set(
             transaction.category_id,
             (breakdownAmounts.get(transaction.category_id) ?? 0) +
@@ -286,12 +331,71 @@ export function useFinanceDashboard(month = currentMonth()) {
         })
         .sort((a, b) => b.amount - a.amount);
 
+      const inMonth = (transaction: Transaction) =>
+        monthKey(transaction.date) <= month &&
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Jakarta",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(transaction.date)) >= settings.opening_date;
+      const balanceRows = allTransactions.filter(inMonth);
+      const cashBalance =
+        month >= settings.opening_date.slice(0, 7)
+          ? settings.opening_balance +
+            balanceRows.reduce(
+              (total, transaction) =>
+                total +
+                (transaction.type === "INCOME"
+                  ? transaction.amount
+                  : -transaction.amount),
+              0,
+            )
+          : 0;
+      const balanceSum = (purposes: TransactionPurpose[]) =>
+        balanceRows
+          .filter((transaction) => purposes.includes(transaction.purpose))
+          .reduce((total, transaction) => total + transaction.amount, 0);
+      const monthSum = (purpose: TransactionPurpose) =>
+        monthTransactions
+          .filter((transaction) => transaction.purpose === purpose)
+          .reduce((total, transaction) => total + transaction.amount, 0);
+      const loanBalance =
+        balanceSum(["LOAN_RECEIVED"]) -
+        balanceSum(["LOAN_PRINCIPAL_REPAYMENT"]);
+      const financeCosts = monthSum("LOAN_INTEREST");
+      const accumulatedOperatingIncome = balanceRows
+        .filter(
+          (transaction) =>
+            transaction.purpose === "OPERATING" &&
+            transaction.type === "INCOME",
+        )
+        .reduce((total, transaction) => total + transaction.amount, 0);
+      const accumulatedOperatingCosts = balanceRows
+        .filter(
+          (transaction) =>
+            transaction.purpose === "OPERATING" &&
+            transaction.type === "EXPENSE",
+        )
+        .reduce((total, transaction) => total + transaction.amount, 0);
+      const accumulatedFinanceCosts = balanceSum(["LOAN_INTEREST"]);
+      const retainedEarnings =
+        accumulatedOperatingIncome -
+        accumulatedOperatingCosts -
+        accumulatedFinanceCosts -
+        balanceSum(["OWNER_WITHDRAWAL"]);
+
       return {
         month,
         income,
         expense,
-        netProfit: income - expense,
-        cashBalance: sum(allTransactions, "INCOME") - sum(allTransactions, "EXPENSE"),
+        netProfit: income - expense - financeCosts,
+        cashBalance,
+        ownerCapital: monthSum("OWNER_CAPITAL"),
+        ownerWithdrawals: monthSum("OWNER_WITHDRAWAL"),
+        loanBalance,
+        assetPurchases: monthSum("ASSET_PURCHASE"),
+        retainedEarnings,
         cashFlow,
         expenseBreakdown,
         recentTransactions: allTransactions.slice(0, 5),
@@ -315,12 +419,15 @@ export function useProfitLossReport(month = currentMonth()) {
       const categoryRows = (categories.data ?? []) as Category[];
       const rows = rowsForMonth(transactions, month);
       const revenue = rows
-        .filter((row) => row.type === "INCOME")
+        .filter((row) => row.purpose === "OPERATING" && row.type === "INCOME")
         .reduce((sum, row) => sum + row.amount, 0);
-      const expenseRows = rows.filter((row) => row.type === "EXPENSE");
+      const expenseRows = rows.filter(
+        (row) => row.purpose === "OPERATING" && row.type === "EXPENSE",
+      );
       const directCosts = expenseRows
         .filter(
           (row) =>
+            row.category_id &&
             categoryRows.find((category) => category.id === row.category_id)
               ?.cost_class === "DIRECT",
         )
@@ -333,16 +440,55 @@ export function useProfitLossReport(month = currentMonth()) {
           return costClass !== "DIRECT";
         })
         .reduce((sum, row) => sum + row.amount, 0);
+      const financeCosts = rows
+        .filter((row) => row.purpose === "LOAN_INTEREST")
+        .reduce((sum, row) => sum + row.amount, 0);
+      const operatingProfit = revenue - directCosts - operatingExpenses;
       return {
         month,
         revenue,
         directCosts,
         grossProfit: revenue - directCosts,
         operatingExpenses,
-        netProfit: revenue - directCosts - operatingExpenses,
+        operatingProfit,
+        financeCosts,
+        netProfit: operatingProfit - financeCosts,
       };
     },
     staleTime: 20_000,
+  });
+}
+
+export function useFinanceSettings() {
+  return useQuery({
+    queryKey: ["finance", "settings"],
+    queryFn: getFinanceSettings,
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateFinanceSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: FinanceSettings) => {
+      if (!supabase) {
+        const demo = readDemoData();
+        demo.settings = input;
+        writeDemoData(demo);
+        return input;
+      }
+      const { data, error } = await supabase
+        .from("finance_settings")
+        .upsert({ id: true, ...input }, { onConflict: "id" })
+        .select("opening_balance,opening_date")
+        .single();
+      if (error) throw error;
+      return {
+        opening_balance: Number(data.opening_balance),
+        opening_date: String(data.opening_date),
+      };
+    },
+    onSuccess: () => invalidateFinance(queryClient),
   });
 }
 

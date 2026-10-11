@@ -1,0 +1,1 @@
+- [Finance ledger rules](finance-ledger-rules.md) — Keep owner funding, borrowing, withdrawals, and reinvestment distinct from operating profit.
