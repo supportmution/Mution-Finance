@@ -766,6 +766,32 @@ export function useDeleteCategory() {
   });
 }
 
+export function useDeleteBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { month_year: string; category_id: string }) => {
+      if (!supabase) {
+        const demo = readDemoData();
+        demo.budgets = demo.budgets.filter(
+          (budget) =>
+            budget.month_year.slice(0, 7) !== input.month_year.slice(0, 7) ||
+            budget.category_id !== input.category_id,
+        );
+        writeDemoData(demo);
+        return input;
+      }
+      const { error } = await supabase
+        .from("budgets")
+        .delete()
+        .eq("month_year", `${input.month_year.slice(0, 7)}-01`)
+        .eq("category_id", input.category_id);
+      if (error) throw error;
+      return input;
+    },
+    onSuccess: () => invalidateFinance(queryClient),
+  });
+}
+
 export function useSaveBudget() {
   const queryClient = useQueryClient();
   return useMutation({
