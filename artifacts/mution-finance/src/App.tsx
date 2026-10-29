@@ -1,13 +1,14 @@
 import { type ReactNode, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from "wouter";
-import { Activity, BarChart3, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, ShieldCheck } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, MessageSquare, ReceiptText, Settings, ShieldCheck } from "lucide-react";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import NotFound from "@/pages/not-found";
 import { LoginPage, OverviewPage, ReportsPage, SettingsPage, TransactionsPage } from "@/pages/finance";
+import { WhatsAppBotPage } from "@/pages/whatsapp";
 
 const queryClient = new QueryClient();
 
@@ -15,6 +16,7 @@ const navigation = [
   { href: "/", label: "Ringkasan", icon: LayoutDashboard },
   { href: "/transactions", label: "Transaksi", icon: ReceiptText },
   { href: "/reports", label: "Laporan", icon: BarChart3 },
+  { href: "/whatsapp", label: "Bot WhatsApp", icon: MessageSquare },
   { href: "/settings", label: "Pengaturan", icon: Settings },
 ];
 
@@ -75,6 +77,7 @@ function ProtectedApp() {
     <Route path="/" component={OverviewPage} />
     <Route path="/transactions" component={TransactionsPage} />
     <Route path="/reports" component={ReportsPage} />
+    <Route path="/whatsapp" component={WhatsAppBotPage} />
     <Route path="/settings" component={SettingsPage} />
     <Route component={NotFound} />
   </Switch></RoutedErrorBoundary></Shell>;
