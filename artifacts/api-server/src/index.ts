@@ -18,6 +18,13 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 
-  // Start WhatsApp Bot in background
-  void initWhatsAppBot();
+  // Start WhatsApp Bot
+  if (process.env.ENABLE_BAILEYS === "true") {
+    logger.info("Starting legacy Baileys WhatsApp bot...");
+    void initWhatsAppBot();
+  } else {
+    logger.info(
+      "WhatsApp Gateway active via Fonnte Webhook. Endpoint: POST /api/fonnte/webhook",
+    );
+  }
 });
