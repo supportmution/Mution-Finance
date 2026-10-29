@@ -137,7 +137,7 @@ export async function processFinancialMessageWithAI(
         const dt = t.date
           ? new Date(t.date).toISOString().replace("T", " ").slice(0, 16)
           : "-";
-        return `${idx + 1}. [${dt}] ${t.type} | Rp ${Number(t.amount).toLocaleString("id-ID")} | Kategori: ${catName} | Ket: ${t.description}${t.payment_method ? ` | Metode: ${t.payment_method}` : ""}`;
+        return `${idx + 1}. [ID: ${t.id}] [${dt}] ${t.type} | Rp ${Number(t.amount).toLocaleString("id-ID")} | Kategori: ${catName} | Ket: ${t.description}${t.payment_method ? ` | Metode: ${t.payment_method}` : ""}`;
       })
       .join("\n");
 
@@ -171,7 +171,29 @@ Kembalikan JSON:
   "payment_method": "BCA / Mandiri / Cash / Kartu Kredit / dll jika disebutkan, atau null"
 }
 
-2. Jika pengguna BERTANYA tentang data keuangan, riwayat, tanggal transaksi, saldo, perbandingan, pengeluaran terbesar, pemasukan terakhir, atau apapun seputar uang (misal: "pemasukan terakhir tgl berapa?", "kemarin kita ada beli apa?", "berapa sisa saldo kita?", "pengeluaran terbesar bulan ini apa?", "total keluar buat bensin berapa?", "siapa aja yg transfer?", "minggu ini ada pengeluaran apa?"):
+2. Jika pengguna ingin MENGEDIT atau MERALAT transaksi yang sudah ada (misal: "ralat tadi bensin bukan 50rb tapi 60rb", "edit transaksi terakhir ganti jadi 75.000", "ganti keterangan bensin tadi jadi bensin mobil kantor", "edit transaksi 50rb tadi metode bayarnya BCA"):
+Cari transaksi yang dimaksud dari daftar transaksi di atas, lalu kembalikan JSON:
+{
+  "action": "UPDATE_TRANSACTION",
+  "transaction_id": "ID transaksi yang ingin diedit (ambil dari tag [ID: ...] di daftar transaksi di atas)",
+  "updated_fields": {
+    "amount": number (opsional, jika nominal diubah),
+    "category_id": "ID kategori" (opsional, jika kategori diubah),
+    "description": "keterangan baru" (opsional, jika keterangan diubah),
+    "payment_method": "metode pembayaran baru" (opsional, jika metode diubah)
+  },
+  "summary": "Penjelasan ringkas apa yang diubah (misal: Jumlah diubah jadi Rp 60.000)"
+}
+
+3. Jika pengguna meminta MENGHAPUS transaksi (misal: "hapus transaksi", "delete transaksi terakhir", "batalkan transaksi"):
+Jelaskan bahwa demi keamanan pencatatan, penghapusan transaksi hanya dapat dilakukan melalui Dashboard Web Mution Finance.
+Kembalikan JSON:
+{
+  "action": "ANSWER_QUESTION",
+  "reply": "⚠️ *Fitur Hapus Transaksi Dinonaktifkan di WhatsApp*\n\nDemi keamanan pencatatan data keuangan, transaksi tidak dapat dihapus melalui chat WhatsApp. Silakan hapus transaksi secara langsung melalui *Dashboard Web Mution Finance*."
+}
+
+4. Jika pengguna BERTANYA tentang data keuangan, riwayat, tanggal transaksi, saldo, perbandingan, pengeluaran terbesar, pemasukan terakhir, atau apapun seputar uang (misal: "pemasukan terakhir tgl berapa?", "kemarin kita ada beli apa?", "berapa sisa saldo kita?", "pengeluaran terbesar bulan ini apa?", "total keluar buat bensin berapa?", "siapa aja yg transfer?", "minggu ini ada pengeluaran apa?"):
 Analisis data transaksi database riil di atas, lalu jawab secara akurat, lugas, dan ramah dalam bahasa Indonesia. Sebutkan tanggal spesifik, nominal, dan keterangannya sesuai data di atas.
 Kembalikan JSON:
 {
@@ -179,7 +201,7 @@ Kembalikan JSON:
   "reply": "Jawaban lengkap dan akurat dalam bahasa Indonesia. Gunakan format WhatsApp (*tebal* untuk angka dan tanggal) agar nyaman dibaca."
 }
 
-3. Jika pengguna menyapa, berterima kasih, atau bertanya hal umum:
+5. Jika pengguna menyapa, berterima kasih, atau bertanya hal umum:
 Kembalikan JSON:
 {
   "action": "CHAT",
@@ -321,6 +343,68 @@ Kembalikan HANYA format JSON valid tanpa format markdown backticks.`;
         `• *Keterangan:* ${parsed.description}\n` +
         (parsed.payment_method ? `• *Metode:* ${parsed.payment_method}\n` : "") +
         `\n_Data langsung tersimpan ke Supabase & muncul di Dashboard Mution Finance._`
+      );
+    }
+
+    // Action 2: UPDATE_TRANSACTION (Edit / Ralat Transaksi)
+    if (parsed.action === "UPDATE_TRANSACTION" && parsed.transaction_id) {
+      const fieldsToUpdate: Record<string, any> = {};
+
+      if (parsed.updated_fields?.amount && Number(parsed.updated_fields.amount) > 0) {
+        fieldsToUpdate.amount = Number(parsed.updated_fields.amount);
+      }
+      if (parsed.updated_fields?.description) {
+        fieldsToUpdate.description = String(parsed.updated_fields.description).trim();
+      }
+      if (parsed.updated_fields?.category_id) {
+        fieldsToUpdate.category_id = parsed.updated_fields.category_id;
+      }
+      if (parsed.updated_fields?.payment_method !== undefined) {
+        fieldsToUpdate.payment_method = parsed.updated_fields.payment_method;
+      }
+
+      if (Object.keys(fieldsToUpdate).length === 0) {
+        return "⚠️ Tidak ada perubahan yang dapat diterapkan pada transaksi tersebut.";
+      }
+
+      fieldsToUpdate.updated_at = new Date().toISOString();
+
+      const updateRes = await fetch(
+        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/transactions?id=eq.${encodeURIComponent(parsed.transaction_id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify(fieldsToUpdate),
+        },
+      );
+
+      if (!updateRes.ok) {
+        const updateErr = await updateRes.text();
+        logger.error({ updateErr }, "Failed to update transaction in Supabase");
+        return `❌ Gagal memperbarui transaksi: ${updateErr.slice(0, 120)}`;
+      }
+
+      let updatedData: any[] = [];
+      try {
+        updatedData = (await updateRes.json()) as any[];
+      } catch {}
+
+      const targetTx = updatedData?.[0];
+
+      return (
+        `✏️ *Transaksi Berhasil Diperbarui!*\n\n` +
+        `• *Perubahan:* ${parsed.summary || "Data berhasil diubah"}\n` +
+        (targetTx
+          ? `• *Detail:* ${targetTx.type === "INCOME" ? "🟢 Pemasukan" : "🔴 Pengeluaran"} ${formatRupiah(Number(targetTx.amount))} - ${targetTx.description}` +
+            (targetTx.payment_method ? ` (${targetTx.payment_method})` : "") +
+            `\n`
+          : "") +
+        `\n_Perubahan otomatis tersinkronisasi ke Dashboard Web Mution Finance._`
       );
     }
 
