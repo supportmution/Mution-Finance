@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   MessageSquare, QrCode, Smartphone, CheckCircle2,
-  RefreshCw, Bot, Sparkles, ShieldCheck, Terminal
+  RefreshCw, Bot, Sparkles, ShieldCheck, Terminal, KeyRound, Cpu, Globe
 } from "lucide-react";
 
 interface WAStatus {
@@ -69,7 +69,7 @@ export function WhatsAppBotPage() {
             Bot WhatsApp
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Hubungkan WhatsApp untuk mencatat pengeluaran, pemasukan, dan melihat saldo secara instan.
+            Hubungkan WhatsApp untuk mencatat pengeluaran, pemasukan, dan melihat saldo secara instan dengan asisten AI.
           </p>
         </div>
 
@@ -118,7 +118,7 @@ export function WhatsAppBotPage() {
                   <p className="font-semibold text-foreground mb-1">
                     💡 Cara Menguji Bot:
                   </p>
-                  Kirim pesan teks <b>!ping</b> ke nomor WhatsApp Anda sendiri. Bot akan langsung merespon.
+                  Kirim pesan teks <b>!menu</b> atau langsung chat <b>keluar 50rb bensin BCA</b> ke nomor WhatsApp Anda sendiri.
                 </div>
               </div>
             ) : (
@@ -157,66 +157,62 @@ export function WhatsAppBotPage() {
           </div>
         </section>
 
-        {/* Kolom Kanan: Panduan & Perintah Bot */}
+        {/* Kolom Kanan: Panduan, Perintah & Konfigurasi AI */}
         <div className="space-y-6">
+          {/* Card Konfigurasi AI */}
           <section className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
             <div className="border-b border-border px-5 py-4">
               <h2 className="font-serif text-lg font-bold flex items-center gap-2">
-                <Terminal size={18} className="text-primary" /> Perintah Bot
+                <Bot size={18} className="text-primary" /> Pengaturan AI Assistant
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Perintah yang dapat Anda kirimkan ke chat WhatsApp.
+                Konfigurasi provider AI yang digunakan bot (OpenAI, Gemini, OpenRouter, Groq, dll).
               </p>
             </div>
-            <div className="divide-y divide-border/70 p-2">
-              <div className="p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-primary bg-[#fff2e8] px-2 py-1 rounded-md">
-                    !ping
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">Cek Status</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Memastikan bot aktif dan merespon dari server Railway.
+            <div className="p-5 space-y-3 text-xs">
+              <div className="rounded-xl border border-border bg-[#fbf8f4] p-3.5 space-y-2">
+                <p className="font-semibold text-foreground flex items-center gap-1.5">
+                  <KeyRound size={14} className="text-primary" /> Environment Variables di Railway:
                 </p>
-              </div>
-
-              <div className="p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-primary bg-[#fff2e8] px-2 py-1 rounded-md">
-                    !menu
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">Bantuan</span>
+                <div className="space-y-1.5 font-mono text-[11px] text-[#715039]">
+                  <p><b className="text-foreground">AI_API_KEY:</b> Kunci API penyedia AI Anda</p>
+                  <p><b className="text-foreground">AI_BASE_URL:</b> Endpoint API (opsional, default: https://api.openai.com/v1)</p>
+                  <p><b className="text-foreground">AI_MODEL_ID:</b> Model yang dipakai (opsional, default: gpt-4o-mini)</p>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Menampilkan ringkasan menu dan format pesan.
-                </p>
               </div>
-
-              <div className="p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-[#45a987] bg-[#ebf7f2] px-2 py-1 rounded-md">
-                    Natural Chat (AI)
-                  </span>
-                  <span className="text-[11px] text-[#45a987] font-semibold">Segera Aktif</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Catat transaksi bahasa santai: <i>"keluar 50rb bensin BCA"</i> atau cek ringkasan: <i>"berapa sisa saldo kita?"</i>
-                </p>
-              </div>
+              <p className="text-muted-foreground leading-relaxed">
+                Anda cukup memasukkan 3 variabel di atas pada tab <b>Variables</b> di Railway Dashboard. Bot otomatis mendeteksi dan langsung aktif.
+              </p>
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-border bg-[#f8f5f0] p-5 shadow-sm">
-            <div className="flex gap-3">
-              <Sparkles size={18} className="mt-0.5 text-primary shrink-0" />
-              <div>
-                <h3 className="text-sm font-bold text-foreground">
-                  Koneksi Aman & Privat
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Bot berjalan langsung di server Railway pribadi Mution.tech dan terhubung ke database Supabase Anda tanpa perantara pihak ketiga.
-                </p>
+          {/* Card Panduan Perintah */}
+          <section className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="font-serif text-lg font-bold flex items-center gap-2">
+                <Terminal size={18} className="text-primary" /> Contoh Pesan Chat
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Kirim pesan berikut langsung ke WhatsApp pribadi Anda:
+              </p>
+            </div>
+            <div className="divide-y divide-border/70 p-2 text-xs">
+              <div className="p-3">
+                <p className="font-bold text-foreground mb-1">🔴 Catat Pengeluaran:</p>
+                <p className="text-muted-foreground italic">"keluar 50rb bensin BCA"</p>
+                <p className="text-muted-foreground italic">"bayar server aws 350.000 pakai kartu kredit"</p>
+              </div>
+
+              <div className="p-3">
+                <p className="font-bold text-foreground mb-1">🟢 Catat Pemasukan:</p>
+                <p className="text-muted-foreground italic">"masuk 10jt pembayaran klien Midtrans"</p>
+                <p className="text-muted-foreground italic">"dapat transfer 250rb"</p>
+              </div>
+
+              <div className="p-3">
+                <p className="font-bold text-foreground mb-1">📊 Cek Laporan & Saldo:</p>
+                <p className="text-muted-foreground italic">"berapa sisa saldo kita?"</p>
+                <p className="text-muted-foreground italic">"ringkasan keuangan bulan ini"</p>
               </div>
             </div>
           </section>

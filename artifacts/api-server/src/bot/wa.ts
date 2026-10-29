@@ -9,6 +9,7 @@ import makeWASocket, {
   type ConnectionState,
 } from "@whiskeysockets/baileys";
 import { logger } from "../lib/logger";
+import { processFinancialMessageWithAI, getAIConfig } from "./ai";
 
 export interface WhatsAppBotState {
   status: "disconnected" | "connecting" | "connected";
@@ -79,7 +80,7 @@ export async function initWhatsAppBot() {
         }
         botState.status = "disconnected";
         botState.lastUpdated = new Date().toISOString();
-        logger.info("New WhatsApp QR code generated. Visit /wa in browser to scan.");
+        logger.info("New WhatsApp QR code generated. Visit /whatsapp in browser to scan.");
       }
 
       if (connection === "open") {
@@ -140,31 +141,66 @@ export async function initWhatsAppBot() {
 
         if (!from || !cleanText) continue;
 
-        // Basic ping test command
+        // Command: !ping
         if (cleanText.toLowerCase() === "!ping" || cleanText.toLowerCase() === "ping") {
           await sock.sendMessage(from, {
-            text: "🏓 *Pong!*\n\nBot WhatsApp *Mution Finance* aktif dan terhubung ke server.\n\n_Ketik *!menu* untuk melihat bantuan._",
+            text: "🏓 *Pong!*\n\nBot WhatsApp *Mution Finance* aktif dan terhubung ke server.\n\n_Ketik *!menu* untuk melihat panduan._",
           });
           continue;
         }
 
+        // Command: !menu / !help
         if (cleanText.toLowerCase() === "!menu" || cleanText.toLowerCase() === "!help") {
+          const aiConfig = getAIConfig();
+          const aiStatus = aiConfig.isConfigured
+            ? `✅ Aktif (${aiConfig.modelId})`
+            : "⚠️ Belum disetel di Railway";
+
           await sock.sendMessage(from, {
             text:
-              "🤖 *Mution Finance WA Bot*\n\n" +
-              "Perintah saat ini:\n" +
-              "• *!ping* - Cek status bot\n" +
-              "• *!info* - Info koneksi bot\n\n" +
-              "_(Fitur pencatatan keuangan otomatis dengan AI API Key sedang disiapkan)_",
+              "🤖 *Mution Finance AI Bot*\n\n" +
+              `• Status AI: ${aiStatus}\n\n` +
+              "Cara Menggunakan:\n" +
+              "1. *Catat Pengeluaran:*\n" +
+              '   _"keluar 50rb bensin BCA"_\n' +
+              '   _"beli domain 150.000 Mandiri"_\n\n' +
+              "2. *Catat Pemasukan:*\n" +
+              '   _"masuk 10jt pembayaran klien"_\n' +
+              '   _"dapat transfer 250rb dari teman"_\n\n' +
+              "3. *Cek Keuangan:*\n" +
+              '   _"berapa sisa saldo kita?"_\n' +
+              '   _"laporan pengeluaran bulan ini"_\n\n' +
+              "4. *Perintah Dasar:*\n" +
+              "   • *!ping* - Cek koneksi server\n" +
+              "   • *!info* - Info bot & server",
           });
           continue;
         }
 
+        // Command: !info
         if (cleanText.toLowerCase() === "!info") {
+          const aiConfig = getAIConfig();
           await sock.sendMessage(from, {
-            text: `ℹ️ *Status Bot:*\n• Status: Aktif\n• Nomor: +${botState.phoneNumber || "-"}\n• Server: Railway Node.js`,
+            text:
+              `ℹ️ *Info Bot Mution Finance:*\n` +
+              `• Status: Aktif & Terhubung\n` +
+              `• Nomor: +${botState.phoneNumber || "-"}\n` +
+              `• AI Provider: ${aiConfig.baseUrl}\n` +
+              `• AI Model: ${aiConfig.modelId}\n` +
+              `• AI Key: ${aiConfig.isConfigured ? "Tersedia ✅" : "Belum diatur ⚠️"}`,
           });
           continue;
+        }
+
+        // Process message through AI
+        try {
+          const aiReply = await processFinancialMessageWithAI(cleanText);
+          await sock.sendMessage(from, { text: aiReply });
+        } catch (err: any) {
+          logger.error({ err }, "Failed to send AI response to WA");
+          await sock.sendMessage(from, {
+            text: `❌ Gagal memproses pesan: ${err.message}`,
+          });
         }
       }
     });
@@ -172,4 +208,3 @@ export async function initWhatsAppBot() {
     logger.error({ err }, "Failed to initialize WhatsApp bot");
   }
 }
-
