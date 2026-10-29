@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   MessageSquare, QrCode, Smartphone, CheckCircle2,
-  RefreshCw, Bot, Sparkles, ShieldCheck, Terminal, KeyRound, Cpu, Globe
+  RefreshCw, Bot, Sparkles, ShieldCheck, Terminal, KeyRound, LogOut
 } from "lucide-react";
 
 interface WAStatus {
@@ -21,7 +21,7 @@ export function WhatsAppBotPage() {
     hasQR: false,
   });
   const [qrImage, setQrImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
 
   const fetchStatus = async () => {
     try {
@@ -42,8 +42,21 @@ export function WhatsAppBotPage() {
       }
     } catch (err) {
       console.error("Gagal mengambil status WhatsApp", err);
+    }
+  };
+
+  const handleResetSession = async () => {
+    if (!window.confirm("Yakin ingin mereset sesi WhatsApp dan memunculkan QR baru?")) {
+      return;
+    }
+    setResetting(true);
+    try {
+      await fetch("/api/wa/reset", { method: "POST" });
+      await fetchStatus();
+    } catch (err) {
+      console.error("Gagal mereset sesi", err);
     } finally {
-      setLoading(false);
+      setResetting(false);
     }
   };
 
@@ -74,6 +87,17 @@ export function WhatsAppBotPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isConnected && (
+            <button
+              onClick={handleResetSession}
+              disabled={resetting}
+              className="flex items-center gap-1.5 rounded-xl border border-border bg-white px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-[#fff0ed] hover:text-destructive hover:border-[#fcd9d3] transition-colors"
+            >
+              <LogOut size={14} />
+              {resetting ? "Mereset..." : "Tautkan Ulang"}
+            </button>
+          )}
+
           <span
             className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold ${
               isConnected

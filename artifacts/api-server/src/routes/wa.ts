@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getWhatsAppState } from "../bot/wa";
+import { getWhatsAppState, resetWhatsAppSession } from "../bot/wa";
 
 const waRouter = Router();
 
@@ -20,6 +20,11 @@ waRouter.get("/api/wa/qr", (_req: Request, res: Response) => {
     status: state.status,
     qrImage: state.qrImage,
   });
+});
+
+waRouter.post("/api/wa/reset", async (_req: Request, res: Response) => {
+  await resetWhatsAppSession();
+  res.json({ success: true, message: "Session reset. Generating new QR." });
 });
 
 // Redirect /wa directly to the integrated Mution Finance dashboard page (/whatsapp)

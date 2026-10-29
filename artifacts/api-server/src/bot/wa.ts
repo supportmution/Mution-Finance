@@ -40,6 +40,44 @@ export function getWhatsAppSocket(): WASocket | null {
   return waSocket;
 }
 
+export async function resetWhatsAppSession() {
+  const sessionDir =
+    process.env.WA_SESSION_PATH ||
+    path.resolve(process.cwd(), "wa_session");
+
+  try {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    if (waSocket) {
+      try {
+        await waSocket.logout();
+      } catch {}
+      waSocket.end(undefined);
+      waSocket = null;
+    }
+
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+
+    botState.status = "disconnected";
+    botState.qrCode = null;
+    botState.qrImage = null;
+    botState.phoneNumber = null;
+    botState.name = null;
+    botState.lastUpdated = new Date().toISOString();
+
+    setTimeout(() => {
+      void initWhatsAppBot();
+    }, 1000);
+  } catch (err) {
+    logger.error({ err }, "Failed to reset WhatsApp session");
+  }
+}
+
 export async function initWhatsAppBot() {
   const sessionDir =
     process.env.WA_SESSION_PATH ||
@@ -62,6 +100,10 @@ export async function initWhatsAppBot() {
       logger: pino({ level: "silent" }) as any,
       browser: ["Mution Finance", "Chrome", "1.0.0"],
       printQRInTerminal: false,
+      syncFullHistory: false, // Prevents loading old historical messages and Bad MAC errors
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false,
+      defaultQueryTimeoutMs: 60000,
     });
 
     waSocket = sock;
@@ -139,7 +181,22 @@ export async function initWhatsAppBot() {
         const cleanText = text.trim();
         const from = msg.key.remoteJid;
 
-        if (!from || !cleanText) continue;
+        // Skip empty or broadcast messages (like WhatsApp stories)
+        if (!from || from.endsWith("@broadcast") || !cleanText) continue;
+
+        // Prevent self-reply loop: if message starts with bot signature, skip
+        const botSignatures = [
+          "🏓 *Pong!*",
+          "🤖 *Mution Finance",
+          "✅ *Transaksi Berhasil",
+          "📊 *Ringkasan Keuangan",
+          "ℹ️ *Info Bot",
+          "❌ Gagal",
+          "⚠️ *",
+        ];
+        if (botSignatures.some((sig) => cleanText.startsWith(sig))) {
+          continue;
+        }
 
         // Command: !ping
         if (cleanText.toLowerCase() === "!ping" || cleanText.toLowerCase() === "ping") {
@@ -163,7 +220,7 @@ export async function initWhatsAppBot() {
               "Cara Menggunakan:\n" +
               "1. *Catat Pengeluaran:*\n" +
               '   _"keluar 50rb bensin BCA"_\n' +
-              '   _"beli domain 150.000 Mandiri"_\n\n' +
+              '   _"bayar server aws 350.000"_\n\n' +
               "2. *Catat Pemasukan:*\n" +
               '   _"masuk 10jt pembayaran klien"_\n' +
               '   _"dapat transfer 250rb dari teman"_\n\n' +
