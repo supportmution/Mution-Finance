@@ -5,8 +5,10 @@ import QRCode from "qrcode";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
+  Browsers,
   type WASocket,
   type ConnectionState,
+  type WAMessageKey,
 } from "@whiskeysockets/baileys";
 import { logger } from "../lib/logger";
 import { processFinancialMessageWithAI, getAIConfig } from "./ai";
@@ -31,6 +33,20 @@ const botState: WhatsAppBotState = {
 
 let waSocket: WASocket | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
+
+// In-memory message store & retry counter to resolve Signal Protocol Bad MAC retry loops
+const messageStore = new Map<string, any>();
+const retryMap = new Map<string, number>();
+
+const msgRetryCounterCache = {
+  get: (key: string) => retryMap.get(key),
+  set: (key: string, value: number) => {
+    retryMap.set(key, value);
+  },
+  del: (key: string) => {
+    retryMap.delete(key);
+  },
+};
 
 export function getWhatsAppState(): WhatsAppBotState {
   return { ...botState };
@@ -64,6 +80,9 @@ export async function resetWhatsAppSession() {
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
     }
+
+    messageStore.clear();
+    retryMap.clear();
 
     botState.status = "disconnected";
     botState.qrCode = null;
@@ -100,12 +119,19 @@ export async function initWhatsAppBot() {
     const sock = makeWASocket({
       auth: state,
       logger: pino({ level: "silent" }) as any,
-      browser: ["Mution Finance", "Chrome", "1.0.0"],
+      browser: Browsers.ubuntu("Chrome"), // Official standard browser signature
       printQRInTerminal: false,
-      syncFullHistory: false, // Prevents Bad MAC errors from old history
-      markOnlineOnConnect: false,
+      syncFullHistory: false, // Prevents Bad MAC errors from old history sync
+      markOnlineOnConnect: true,
       generateHighQualityLinkPreview: false,
       defaultQueryTimeoutMs: 60000,
+      msgRetryCounterCache: msgRetryCounterCache as any,
+      getMessage: async (key: WAMessageKey) => {
+        if (key.id && messageStore.has(key.id)) {
+          return messageStore.get(key.id);
+        }
+        return undefined;
+      },
     });
 
     waSocket = sock;
@@ -160,7 +186,6 @@ export async function initWhatsAppBot() {
         if (reconnectTimer) clearTimeout(reconnectTimer);
 
         if (isLoggedOut) {
-          // User unlinked/logged out from phone: clean session and spin up fresh QR automatically
           logger.info("User logged out from phone. Cleaning session and generating fresh QR code...");
           try {
             if (fs.existsSync(sessionDir)) {
@@ -173,7 +198,6 @@ export async function initWhatsAppBot() {
             void initWhatsAppBot();
           }, 1500);
         } else {
-          // Reconnect on temporary network drop
           reconnectTimer = setTimeout(() => {
             logger.info("Reconnecting WhatsApp bot...");
             void initWhatsAppBot();
@@ -183,6 +207,17 @@ export async function initWhatsAppBot() {
     });
 
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      // Store all messages in messageStore for Signal Protocol decryption retries
+      for (const msg of messages) {
+        if (msg.key?.id && msg.message) {
+          messageStore.set(msg.key.id, msg.message);
+          if (messageStore.size > 200) {
+            const firstKey = messageStore.keys().next().value;
+            if (firstKey) messageStore.delete(firstKey);
+          }
+        }
+      }
+
       if (type !== "notify") return;
 
       for (const msg of messages) {
@@ -213,6 +248,11 @@ export async function initWhatsAppBot() {
         if (botSignatures.some((sig) => cleanText.startsWith(sig))) {
           continue;
         }
+
+        logger.info(
+          { from, text: cleanText, fromMe: msg.key.fromMe },
+          "Received incoming WhatsApp message",
+        );
 
         // Command: !ping
         if (cleanText.toLowerCase() === "!ping" || cleanText.toLowerCase() === "ping") {
