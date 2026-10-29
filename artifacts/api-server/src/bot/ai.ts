@@ -8,10 +8,13 @@ interface CategoryRecord {
 }
 
 interface TransactionRecord {
+  id: string;
   amount: number | string;
-  type: string;
+  type: "INCOME" | "EXPENSE";
   description: string;
   date: string;
+  payment_method: string | null;
+  category_id: string;
 }
 
 const supabaseUrl =
@@ -78,49 +81,112 @@ export async function processFinancialMessageWithAI(
       logger.warn({ catErr }, "Unable to fetch categories from Supabase");
     }
 
+    const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
     const categoryList = categories
       .map((c: CategoryRecord) => `- ${c.name} (ID: ${c.id}, Jenis: ${c.type})`)
       .join("\n");
 
     const now = new Date();
     const currentDate = now.toISOString().slice(0, 10);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const systemPrompt = `You are Mution Finance AI Assistant, an intelligent financial tracker for Mution.tech via WhatsApp.
-Current Date: ${currentDate}.
+    // 2. Fetch real transactions from Supabase for live context
+    let recentTransactions: TransactionRecord[] = [];
+    try {
+      const txRes = await fetch(
+        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/transactions?select=id,date,type,amount,description,payment_method,category_id&order=date.desc&limit=100`,
+        {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+        },
+      );
+      if (txRes.ok) {
+        recentTransactions = (await txRes.json()) as TransactionRecord[];
+      }
+    } catch (txErr) {
+      logger.warn({ txErr }, "Unable to fetch transactions from Supabase");
+    }
+
+    // Compute key financial metrics from live database
+    let totalIncomeAll = 0;
+    let totalExpenseAll = 0;
+    let totalIncomeThisMonth = 0;
+    let totalExpenseThisMonth = 0;
+
+    for (const t of recentTransactions) {
+      const amt = Number(t.amount || 0);
+      const tDate = new Date(t.date);
+      if (t.type === "INCOME") {
+        totalIncomeAll += amt;
+        if (tDate >= startOfMonth) totalIncomeThisMonth += amt;
+      } else {
+        totalExpenseAll += amt;
+        if (tDate >= startOfMonth) totalExpenseThisMonth += amt;
+      }
+    }
+
+    const currentBalance = totalIncomeAll - totalExpenseAll;
+    const netProfitThisMonth = totalIncomeThisMonth - totalExpenseThisMonth;
+
+    const transactionLines = recentTransactions
+      .slice(0, 60)
+      .map((t, idx) => {
+        const catName = categoryMap.get(t.category_id) || "Umum";
+        const dt = t.date
+          ? new Date(t.date).toISOString().replace("T", " ").slice(0, 16)
+          : "-";
+        return `${idx + 1}. [${dt}] ${t.type} | Rp ${Number(t.amount).toLocaleString("id-ID")} | Kategori: ${catName} | Ket: ${t.description}${t.payment_method ? ` | Metode: ${t.payment_method}` : ""}`;
+      })
+      .join("\n");
+
+    const systemPrompt = `You are Mution Finance AI Assistant, an intelligent, flexible, and accurate financial companion for Mution.tech via WhatsApp.
+Current Date: ${currentDate} (WIB / GMT+7).
 Currency: Indonesian Rupiah (IDR).
 
-Available Categories in Database:
-${categoryList || "No custom categories yet. Use generic category."}
+RINGKASAN KEUANGAN DARI DATABASE:
+• Saldo Saat Ini: ${formatRupiah(currentBalance)}
+• Total Pemasukan Bulan Ini: ${formatRupiah(totalIncomeThisMonth)}
+• Total Pengeluaran Bulan Ini: ${formatRupiah(totalExpenseThisMonth)}
+• Laba Bersih Bulan Ini: ${formatRupiah(netProfitThisMonth)}
+• Total Catatan Transaksi: ${recentTransactions.length} transaksi
 
-Your job is to analyze the user's message and determine the action:
-1. If the user wants to record an EXPENSE or INCOME (e.g. "keluar 50rb bensin", "beli server aws 250.000", "dapat bayaran 10jt"):
-Return valid JSON only in this format:
+DAFTAR TRANSAKSI TERBARU DARI DATABASE:
+${transactionLines || "(Belum ada transaksi di database)"}
+
+DAFTAR KATEGORI TERSEDIA:
+${categoryList || "Umum"}
+
+TUGAS ANDA:
+1. Jika pengguna ingin MENCATAT transaksi baru (misal: "keluar 50rb bensin", "masuk 10jt DP klien", "tadi bayar server aws 350.000", "beli makan siang 35rb"):
+Kembalikan JSON:
 {
   "action": "RECORD_TRANSACTION",
-  "type": "EXPENSE" or "INCOME",
-  "amount": number (integer in IDR, e.g. 50000 for 50rb/50k),
-  "category_id": "exact ID from list above if matches, otherwise null",
-  "category_name": "name of closest category",
-  "description": "clean description of what was purchased/received",
-  "payment_method": "BCA / Mandiri / Cash / Card / etc. if mentioned, otherwise null"
+  "type": "EXPENSE" atau "INCOME",
+  "amount": number (integer Rupiah),
+  "category_id": "ID kategori dari daftar di atas jika cocok, atau null",
+  "category_name": "Nama kategori terdekat",
+  "description": "Deskripsi bersih transaksi",
+  "payment_method": "BCA / Mandiri / Cash / Kartu Kredit / dll jika disebutkan, atau null"
 }
 
-2. If the user asks for balance, spending summary, or report (e.g. "berapa saldo kita?", "laporan bulan ini", "pengeluaran terbesar apa?"):
-Return valid JSON only:
+2. Jika pengguna BERTANYA tentang data keuangan, riwayat, tanggal transaksi, saldo, perbandingan, pengeluaran terbesar, pemasukan terakhir, atau apapun seputar uang (misal: "pemasukan terakhir tgl berapa?", "kemarin kita ada beli apa?", "berapa sisa saldo kita?", "pengeluaran terbesar bulan ini apa?", "total keluar buat bensin berapa?", "siapa aja yg transfer?", "minggu ini ada pengeluaran apa?"):
+Analisis data transaksi database riil di atas, lalu jawab secara akurat, lugas, dan ramah dalam bahasa Indonesia. Sebutkan tanggal spesifik, nominal, dan keterangannya sesuai data di atas.
+Kembalikan JSON:
 {
-  "action": "GET_REPORT",
-  "query": "summary"
+  "action": "ANSWER_QUESTION",
+  "reply": "Jawaban lengkap dan akurat dalam bahasa Indonesia. Gunakan format WhatsApp (*tebal* untuk angka dan tanggal) agar nyaman dibaca."
 }
 
-3. If the user is chatting, asking for help, or greeting:
-Return valid JSON only:
+3. Jika pengguna menyapa, berterima kasih, atau bertanya hal umum:
+Kembalikan JSON:
 {
   "action": "CHAT",
-  "reply": "friendly, helpful response in Indonesian as Mution Finance bot"
+  "reply": "Jawaban ramah dalam bahasa Indonesia sebagai asisten bot Mution Finance."
 }
 
-Respond STRICTLY with JSON without backticks or markdown formatting.`;
+Kembalikan HANYA format JSON valid tanpa format markdown backticks.`;
 
     const cleanBaseUrl = config.baseUrl.replace(/\/+$/, "");
     const endpoint = `${cleanBaseUrl}/chat/completions`;
@@ -258,47 +324,27 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
       );
     }
 
-    // Action 2: GET_REPORT
+    // Action 2: ANSWER_QUESTION / CHAT / Custom Response
+    if (parsed.reply) {
+      return parsed.reply;
+    }
+
+    // Fallback Action: GET_REPORT
     if (parsed.action === "GET_REPORT") {
-      let txs: TransactionRecord[] = [];
-      const txRes = await fetch(
-        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/transactions?select=amount,type,description,date&date=gte.${encodeURIComponent(startOfMonth)}`,
-        {
-          headers: {
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-          },
-        },
-      );
-
-      if (txRes.ok) {
-        txs = (await txRes.json()) as TransactionRecord[];
-      }
-
-      let totalIncome = 0;
-      let totalExpense = 0;
-
-      for (const t of txs) {
-        if (t.type === "INCOME") totalIncome += Number(t.amount || 0);
-        if (t.type === "EXPENSE") totalExpense += Number(t.amount || 0);
-      }
-
-      const netProfit = totalIncome - totalExpense;
-
       return (
-        `📊 *Ringkasan Keuangan Bulan Ini:*\n\n` +
-        `💰 *Pemasukan:* ${formatRupiah(totalIncome)}\n` +
-        `💸 *Pengeluaran:* ${formatRupiah(totalExpense)}\n` +
-        `📈 *Laba/Rugi BersI:* ${formatRupiah(netProfit)}\n` +
-        `📝 *Total Transaksi:* ${txs.length} catatan\n\n` +
+        `📊 *Ringkasan Keuangan Saat Ini:*\n\n` +
+        `💳 *Saldo Keseluruhan:* ${formatRupiah(currentBalance)}\n` +
+        `💰 *Pemasukan Bulan Ini:* ${formatRupiah(totalIncomeThisMonth)}\n` +
+        `💸 *Pengeluaran Bulan Ini:* ${formatRupiah(totalExpenseThisMonth)}\n` +
+        `📈 *Laba/Rugi Bersih:* ${formatRupiah(netProfitThisMonth)}\n` +
+        `📝 *Total Transaksi:* ${recentTransactions.length} catatan\n\n` +
         `_Buka dashboard web untuk melihat laporan lengkap & grafik arus kas._`
       );
     }
 
-    // Action 3: CHAT
     return (
       parsed.reply ||
-      "Halo! Saya bot Mution Finance. Anda bisa mencatat transaksi (contoh: *keluar 50rb bensin*) atau tanya *berapa pengeluaran bulan ini?*."
+      "Halo! Saya asisten Mution Finance. Anda bisa bertanya tentang keuangan atau mencatat transaksi (contoh: *keluar 50rb bensin*)."
     );
   } catch (err: any) {
     logger.error({ err }, "Error processing AI financial message");
