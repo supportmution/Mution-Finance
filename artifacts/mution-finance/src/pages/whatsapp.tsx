@@ -46,17 +46,19 @@ export function WhatsAppBotPage() {
   };
 
   const handleResetSession = async () => {
-    if (!window.confirm("Yakin ingin mereset sesi WhatsApp dan memunculkan QR baru?")) {
-      return;
-    }
     setResetting(true);
+    setQrImage(null);
     try {
       await fetch("/api/wa/reset", { method: "POST" });
-      await fetchStatus();
+      setTimeout(async () => {
+        await fetchStatus();
+      }, 1800);
     } catch (err) {
       console.error("Gagal mereset sesi", err);
     } finally {
-      setResetting(false);
+      setTimeout(() => {
+        setResetting(false);
+      }, 2000);
     }
   };
 
@@ -87,16 +89,14 @@ export function WhatsAppBotPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isConnected && (
-            <button
-              onClick={handleResetSession}
-              disabled={resetting}
-              className="flex items-center gap-1.5 rounded-xl border border-border bg-white px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-[#fff0ed] hover:text-destructive hover:border-[#fcd9d3] transition-colors"
-            >
-              <LogOut size={14} />
-              {resetting ? "Mereset..." : "Tautkan Ulang"}
-            </button>
-          )}
+          <button
+            onClick={handleResetSession}
+            disabled={resetting}
+            className="flex items-center gap-1.5 rounded-xl border border-border bg-white px-3.5 py-2 text-xs font-semibold text-muted-foreground hover:bg-[#fff0ed] hover:text-destructive hover:border-[#fcd9d3] transition-colors shadow-sm"
+          >
+            <RefreshCw size={13} className={resetting ? "animate-spin text-primary" : ""} />
+            {resetting ? "Membuat QR Baru..." : isConnected ? "Tautkan Ulang" : "Reset & Buat QR Baru"}
+          </button>
 
           <span
             className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold ${
@@ -118,11 +118,13 @@ export function WhatsAppBotPage() {
       <div className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
         {/* Kolom Kiri: Status & QR Code */}
         <section className="overflow-hidden rounded-2xl border border-border bg-white shadow-sm">
-          <div className="border-b border-border px-5 py-4">
-            <h2 className="font-serif text-lg font-bold">Koneksi Perangkat</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Tautkan akun WhatsApp Anda menggunakan pemindai QR Code.
-            </p>
+          <div className="border-b border-border px-5 py-4 flex items-center justify-between">
+            <div>
+              <h2 className="font-serif text-lg font-bold">Koneksi Perangkat</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Tautkan akun WhatsApp Anda menggunakan pemindai QR Code.
+              </p>
+            </div>
           </div>
 
           <div className="p-6">
@@ -155,9 +157,10 @@ export function WhatsAppBotPage() {
                       className="h-[260px] w-[260px] rounded-xl object-contain shadow-sm"
                     />
                   ) : (
-                    <div className="flex h-[260px] w-[260px] flex-col items-center justify-center rounded-xl bg-white text-muted-foreground">
-                      <RefreshCw className="h-8 w-8 animate-spin text-primary mb-2" />
-                      <p className="text-xs">Menyiapkan QR Code...</p>
+                    <div className="flex h-[260px] w-[260px] flex-col items-center justify-center rounded-xl bg-white text-muted-foreground p-4">
+                      <RefreshCw className="h-8 w-8 animate-spin text-primary mb-3" />
+                      <p className="text-xs font-semibold text-foreground">Menyiapkan QR Code Baru...</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">Jika belum muncul dalam beberapa detik, klik tombol "Reset & Buat QR Baru" di atas.</p>
                     </div>
                   )}
                 </div>

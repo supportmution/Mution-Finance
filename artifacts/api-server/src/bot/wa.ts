@@ -55,7 +55,9 @@ export async function resetWhatsAppSession() {
       try {
         await waSocket.logout();
       } catch {}
-      waSocket.end(undefined);
+      try {
+        waSocket.end(undefined);
+      } catch {}
       waSocket = null;
     }
 
@@ -72,7 +74,7 @@ export async function resetWhatsAppSession() {
 
     setTimeout(() => {
       void initWhatsAppBot();
-    }, 1000);
+    }, 1500);
   } catch (err) {
     logger.error({ err }, "Failed to reset WhatsApp session");
   }
@@ -100,7 +102,7 @@ export async function initWhatsAppBot() {
       logger: pino({ level: "silent" }) as any,
       browser: ["Mution Finance", "Chrome", "1.0.0"],
       printQRInTerminal: false,
-      syncFullHistory: false, // Prevents loading old historical messages and Bad MAC errors
+      syncFullHistory: false, // Prevents Bad MAC errors from old history
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
       defaultQueryTimeoutMs: 60000,
@@ -143,25 +145,39 @@ export async function initWhatsAppBot() {
         botState.status = "disconnected";
         botState.qrCode = null;
         botState.qrImage = null;
+        botState.phoneNumber = null;
+        botState.name = null;
         botState.lastUpdated = new Date().toISOString();
 
-        const shouldReconnect =
-          (lastDisconnect?.error as any)?.output?.statusCode !==
-          DisconnectReason.loggedOut;
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
         logger.warn(
-          { shouldReconnect, err: lastDisconnect?.error },
+          { statusCode, isLoggedOut, err: lastDisconnect?.error },
           "WhatsApp connection closed",
         );
 
-        if (shouldReconnect) {
-          if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+
+        if (isLoggedOut) {
+          // User unlinked/logged out from phone: clean session and spin up fresh QR automatically
+          logger.info("User logged out from phone. Cleaning session and generating fresh QR code...");
+          try {
+            if (fs.existsSync(sessionDir)) {
+              fs.rmSync(sessionDir, { recursive: true, force: true });
+            }
+          } catch (cleanErr) {
+            logger.error({ cleanErr }, "Error cleaning session dir");
+          }
+          reconnectTimer = setTimeout(() => {
+            void initWhatsAppBot();
+          }, 1500);
+        } else {
+          // Reconnect on temporary network drop
           reconnectTimer = setTimeout(() => {
             logger.info("Reconnecting WhatsApp bot...");
             void initWhatsAppBot();
-          }, 5000);
-        } else {
-          logger.warn("WhatsApp logged out. Please rescan QR code.");
+          }, 4000);
         }
       }
     });
