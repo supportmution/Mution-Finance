@@ -172,3 +172,4 @@ export async function initWhatsAppBot() {
     logger.error({ err }, "Failed to initialize WhatsApp bot");
   }
 }
+

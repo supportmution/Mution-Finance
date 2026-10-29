@@ -110,3 +110,4 @@ waRouter.get("/wa", (_req: Request, res: Response) => {
 });
 
 export default waRouter;
+
