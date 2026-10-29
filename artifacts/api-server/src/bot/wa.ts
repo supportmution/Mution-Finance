@@ -6,6 +6,7 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
   Browsers,
   type WASocket,
   type ConnectionState,
@@ -118,10 +119,25 @@ export async function initWhatsAppBot() {
     const baileysLogger = pino({ level: "silent" });
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
+    let version: [number, number, number] = [2, 3000, 1043857760];
+    try {
+      const v = await fetchLatestBaileysVersion();
+      if (v?.version) {
+        version = v.version;
+        logger.info(
+          { version: version.join("."), isLatest: v.isLatest },
+          "Using latest WhatsApp Web version",
+        );
+      }
+    } catch (vErr) {
+      logger.warn({ vErr }, "Could not fetch latest Baileys version, using fallback");
+    }
+
     botState.status = "connecting";
     botState.lastUpdated = new Date().toISOString();
 
     const sock = makeWASocket({
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
@@ -133,6 +149,7 @@ export async function initWhatsAppBot() {
       markOnlineOnConnect: true,
       generateHighQualityLinkPreview: false,
       defaultQueryTimeoutMs: 60000,
+      shouldIgnoreJid: (jid) => jid.endsWith("@broadcast"),
       msgRetryCounterCache: msgRetryCounterCache as any,
       cachedGroupMetadata: async (jid: string) => {
         if (groupMetadataCache.has(jid)) {
