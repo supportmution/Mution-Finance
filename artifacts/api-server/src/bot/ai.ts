@@ -138,31 +138,67 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
           { role: "user", content: userMessage },
         ],
         temperature: 0.2,
+        stream: false,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
       logger.error({ status: response.status, errText }, "AI API call failed");
-      return `❌ Gagal menghubungi provider AI (${response.status}): ${errText.slice(0, 100)}`;
+      return `❌ Gagal menghubungi provider AI (${response.status}): ${errText.slice(0, 120)}`;
     }
 
-    const resJson = (await response.json()) as any;
-    const rawContent: string =
-      resJson.choices?.[0]?.message?.content?.trim() || "";
+    const rawText = await response.text();
+    let rawContent = "";
 
-    // Parse JSON from response
-    const cleanJson = rawContent
+    // Handle both direct JSON completion and SSE stream (data: {...}) responses
+    if (rawText.trim().startsWith("data:")) {
+      const lines = rawText.split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data:") && !trimmed.includes("[DONE]")) {
+          const jsonStr = trimmed.replace(/^data:\s*/, "").trim();
+          try {
+            const chunk = JSON.parse(jsonStr);
+            const delta =
+              chunk.choices?.[0]?.delta?.content ||
+              chunk.choices?.[0]?.message?.content ||
+              "";
+            rawContent += delta;
+          } catch {}
+        }
+      }
+    } else {
+      try {
+        const resJson = JSON.parse(rawText);
+        rawContent = resJson.choices?.[0]?.message?.content?.trim() || "";
+      } catch {
+        rawContent = rawText.trim();
+      }
+    }
+
+    // Smart JSON extractor (handles markdown blocks, extra text before/after JSON)
+    let parsed: any = null;
+    const cleanCandidate = rawContent
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/```$/i, "")
       .trim();
 
-    let parsed: any;
     try {
-      parsed = JSON.parse(cleanJson);
+      parsed = JSON.parse(cleanCandidate);
     } catch {
-      return rawContent;
+      const firstBrace = cleanCandidate.indexOf("{");
+      const lastBrace = cleanCandidate.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          parsed = JSON.parse(cleanCandidate.slice(firstBrace, lastBrace + 1));
+        } catch {}
+      }
+    }
+
+    if (!parsed) {
+      return rawContent || "⚠️ Maaf, AI tidak memberikan respon yang sesuai.";
     }
 
     // Action 1: RECORD_TRANSACTION
