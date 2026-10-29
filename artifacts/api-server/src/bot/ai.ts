@@ -1,5 +1,18 @@
-import { createClient } from "@supabase/supabase-js";
 import { logger } from "../lib/logger";
+
+interface CategoryRecord {
+  id: string;
+  name: string;
+  type: "INCOME" | "EXPENSE";
+  cost_class: string | null;
+}
+
+interface TransactionRecord {
+  amount: number | string;
+  type: string;
+  description: string;
+  date: string;
+}
 
 const supabaseUrl =
   process.env.VITE_SUPABASE_URL ||
@@ -11,8 +24,6 @@ const supabaseKey =
   process.env.VITE_SUPABASE_ANON_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   "sb_publishable_L8aeCLVv9v5XxkMwoVNGRA_fz4iU1aJ";
-
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 export function getAIConfig() {
   return {
@@ -48,13 +59,27 @@ export async function processFinancialMessageWithAI(
   }
 
   try {
-    // 1. Fetch available categories from Supabase
-    const { data: categories } = await supabase
-      .from("categories")
-      .select("id, name, type, cost_class");
+    // 1. Fetch available categories from Supabase PostgREST
+    let categories: CategoryRecord[] = [];
+    try {
+      const catRes = await fetch(
+        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/categories?select=id,name,type,cost_class`,
+        {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+        },
+      );
+      if (catRes.ok) {
+        categories = (await catRes.json()) as CategoryRecord[];
+      }
+    } catch (catErr) {
+      logger.warn({ catErr }, "Unable to fetch categories from Supabase");
+    }
 
-    const categoryList = (categories || [])
-      .map((c) => `- ${c.name} (ID: ${c.id}, Jenis: ${c.type})`)
+    const categoryList = categories
+      .map((c: CategoryRecord) => `- ${c.name} (ID: ${c.id}, Jenis: ${c.type})`)
       .join("\n");
 
     const now = new Date();
@@ -122,8 +147,9 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
       return `❌ Gagal menghubungi provider AI (${response.status}): ${errText.slice(0, 100)}`;
     }
 
-    const resJson = await response.json();
-    const rawContent = resJson.choices?.[0]?.message?.content?.trim() || "";
+    const resJson = (await response.json()) as any;
+    const rawContent: string =
+      resJson.choices?.[0]?.message?.content?.trim() || "";
 
     // Parse JSON from response
     const cleanJson = rawContent
@@ -143,9 +169,9 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
     if (parsed.action === "RECORD_TRANSACTION" && parsed.amount > 0) {
       let matchedCategoryId = parsed.category_id;
 
-      if (!matchedCategoryId && categories?.length) {
+      if (!matchedCategoryId && categories.length) {
         const found = categories.find(
-          (c) =>
+          (c: CategoryRecord) =>
             c.name.toLowerCase() === parsed.category_name?.toLowerCase() ||
             (c.type === parsed.type &&
               c.name.toLowerCase().includes(parsed.category_name?.toLowerCase())),
@@ -157,18 +183,31 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
         return "⚠️ Kategori belum tersedia di database. Tambahkan kategori terlebih dahulu di dashboard.";
       }
 
-      const { error: insertErr } = await supabase.from("transactions").insert({
-        type: parsed.type,
-        category_id: matchedCategoryId,
-        amount: parsed.amount,
-        description: parsed.description || userMessage,
-        payment_method: parsed.payment_method || null,
-        date: new Date().toISOString(),
-      });
+      const insertRes = await fetch(
+        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/transactions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            type: parsed.type,
+            category_id: matchedCategoryId,
+            amount: parsed.amount,
+            description: parsed.description || userMessage,
+            payment_method: parsed.payment_method || null,
+            date: new Date().toISOString(),
+          }),
+        },
+      );
 
-      if (insertErr) {
+      if (!insertRes.ok) {
+        const insertErr = await insertRes.text();
         logger.error({ insertErr }, "Failed to insert transaction");
-        return `❌ Gagal mencatat transaksi: ${insertErr.message}`;
+        return `❌ Gagal mencatat transaksi: ${insertErr.slice(0, 120)}`;
       }
 
       const typeLabel = parsed.type === "INCOME" ? "🟢 Pemasukan" : "🔴 Pengeluaran";
@@ -185,19 +224,25 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
 
     // Action 2: GET_REPORT
     if (parsed.action === "GET_REPORT") {
-      const { data: txs, error: txErr } = await supabase
-        .from("transactions")
-        .select("amount, type, description, date")
-        .gte("date", startOfMonth);
+      let txs: TransactionRecord[] = [];
+      const txRes = await fetch(
+        `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/transactions?select=amount,type,description,date&date=gte.${encodeURIComponent(startOfMonth)}`,
+        {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+        },
+      );
 
-      if (txErr) {
-        return `❌ Gagal memuat ringkasan keuangan: ${txErr.message}`;
+      if (txRes.ok) {
+        txs = (await txRes.json()) as TransactionRecord[];
       }
 
       let totalIncome = 0;
       let totalExpense = 0;
 
-      for (const t of txs || []) {
+      for (const t of txs) {
         if (t.type === "INCOME") totalIncome += Number(t.amount || 0);
         if (t.type === "EXPENSE") totalExpense += Number(t.amount || 0);
       }
@@ -208,8 +253,8 @@ Respond STRICTLY with JSON without backticks or markdown formatting.`;
         `📊 *Ringkasan Keuangan Bulan Ini:*\n\n` +
         `💰 *Pemasukan:* ${formatRupiah(totalIncome)}\n` +
         `💸 *Pengeluaran:* ${formatRupiah(totalExpense)}\n` +
-        `📈 *Laba/Rugi Bersih:* ${formatRupiah(netProfit)}\n` +
-        `📝 *Total Transaksi:* ${txs?.length || 0} catatan\n\n` +
+        `📈 *Laba/Rugi BersI:* ${formatRupiah(netProfit)}\n` +
+        `📝 *Total Transaksi:* ${txs.length} catatan\n\n` +
         `_Buka dashboard web untuk melihat laporan lengkap & grafik arus kas._`
       );
     }

@@ -30,7 +30,6 @@ async function buildAll() {
     external: [
       "@whiskeysockets/baileys",
       "qrcode",
-      "@supabase/supabase-js",
       "*.node",
       "sharp",
       "better-sqlite3",
